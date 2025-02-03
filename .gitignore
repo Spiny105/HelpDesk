@@ -1,9 +1,10 @@
+/.idea
 /.vscode
 /__pycache__
 app/database.db
 config.py
 aiogram_bot_example.py
 email_example.py
-app/__pycache__/sql.cpython-311.pyc
-app/__pycache__/sql.cpython-311.pyc
+app/__pycache__/sql.cpython-313.pyc
+app/__pycache__/sql.cpython-313.pyc
 config.py
