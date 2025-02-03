@@ -1,5 +1,6 @@
-BOT_TOKEN = 'YOU_BOT_TOKEN' #test 
+# Установите ваш токен Telegram-бота
+BOT_TOKEN = "token_string"
 
-
-ADMIN_USERS = [ID MODER, ID MODER]
-ADMIN_MESSAGE = ID ADMIN
+# Можно узнать у ТГ бота @userinfobot
+ADMIN_USERS = [ADMIN_ID, MODER_ID]
+ADMIN_MESSAGE = ADMIN_ID
