@@ -3,6 +3,7 @@
 /__pycache__
 app/database.db
 aiogram_bot_example.py
+config.py
 email_example.py
 app/__pycache__/sql.cpython-313.pyc
 app/__pycache__/sql.cpython-313.pyc
