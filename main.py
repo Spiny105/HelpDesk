@@ -5,7 +5,7 @@ from aiogram.types import InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from app import sql
-from config import ADMIN_USERS, ADMIN_MESSAGE, BOT_TOKEN
+from config import ADMIN_USERS, ADMIN_MESSAGE, BOT_TOKEN, USERS
 import datetime
 
 import asyncio
@@ -25,7 +25,12 @@ async def send_start(message: types.Message):
     user_id = message.from_user.id
     data_reg = message.date
     user = sql.get_user_by_id(user_id)
-    
+
+    # Проверяем, может ли этот пользователь писать боту
+    if user_id not in USERS:
+        await message.answer("У Вас нет доступа")
+        return
+
     if not user:
         # Если пользователь отсутствует, добавляем его
         user_info = {
@@ -279,6 +284,11 @@ def admin_panel():
 async def handle_ticket_callback(query: types.CallbackQuery):
     user_id = query.from_user.id
     tg_id = user_id
+
+    # Проверяем, может ли этот пользователь писать боту
+    if user_id not in USERS:
+        await query.answer("У Вас нет доступа")
+        return
     
 
     if query.data.startswith('ticket_'):
@@ -312,11 +322,16 @@ async def handle_ticket_callback(query: types.CallbackQuery):
 
 
 
-# Группа колбеков на батоны
+# Группа колбеков на кнопки
 @dp.callback_query()
 async def inline_kb_answer_callback_handler(query: types.CallbackQuery):
     user_id = query.from_user.id
     tg_id = user_id
+
+    # Проверяем, может ли этот пользователь писать боту
+    if user_id not in USERS:
+        await query.answer("У Вас нет доступа")
+        return
         
     if query.data == 'admin_panel':
         # Обновление ячейки 'pos' в базе данных
@@ -438,6 +453,11 @@ async def handle_text_input(message: types.Message):
     organization_address = profile.get("organization_adress", "") 
     organization_phone = profile.get("organization_phone", "Нет данных")
     user_position = sql.read_cell('pos', 'tg_id', user_id)
+
+    # Проверяем, может ли этот пользователь писать боту
+    if user_id not in USERS:
+        await message.answer("У Вас нет доступа")
+        return
 
     if user_position.startswith('ticket_details_'):
         parts = user_position.split('_')
