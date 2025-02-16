@@ -176,9 +176,22 @@ def get_tickets_in_progress_by_user_id(tg_id):
     Returns:
         list: Список задач в работе.
     """
-    query = 'SELECT * FROM ticket WHERE tg_id_ticket=? AND state_ticket=?'
+    query = 'SELECT * FROM ticket WHERE tg_id_ticket=? AND state_ticket=? ORDER BY number_ticket'
     result = execute_query(query, (tg_id, "В работе"))
     return result
+
+
+def get_last_ticket_in_progress_by_user_id(tg_id):
+    """
+        Возвращает последнюю созданную задачу в работе для указанного пользователя.
+
+        Parameters:
+            tg_id (int): Telegram ID пользователя.
+
+        Returns:
+            tuple: Кортеж с данными о последней созданной задаче в работе.
+        """
+    return get_tickets_in_progress_by_user_id(tg_id)[-1]
 
 
 def update_pos(pos_value, column, value):
@@ -261,7 +274,7 @@ def get_all_tickets_in_progress():
     """
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute('SELECT * FROM ticket WHERE state_ticket=?', ("В работе",))
+    cursor.execute('SELECT * FROM ticket WHERE state_ticket=? ORDER BY number_ticket', ("В работе",))
     all_tickets_in_progress = cursor.fetchall()
     conn.close()
     return all_tickets_in_progress
@@ -316,7 +329,7 @@ def get_completed_tickets_by_user(tg_id):
     """
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute('SELECT * FROM ticket WHERE tg_id_ticket=? AND state_ticket=?', (tg_id, "Завершена"))
+    cursor.execute('SELECT * FROM ticket WHERE tg_id_ticket=? AND state_ticket=? ORDER BY number_ticket', (tg_id, "Завершена"))
     completed_tickets = cursor.fetchall()
     conn.close()
     return completed_tickets

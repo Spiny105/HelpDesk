@@ -1,3 +1,6 @@
+import os
+
+import aiohttp
 from aiogram import Bot, Dispatcher, types
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.filters import Command
@@ -5,7 +8,7 @@ from aiogram.types import InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from app import sql
-from config import ADMIN_USERS, ADMIN_MESSAGE, BOT_TOKEN, USERS
+from config import ADMIN_USERS, ADMIN_MESSAGE, BOT_TOKEN, USERS, UPLOAD_FOLDER
 import datetime
 
 import asyncio
@@ -19,6 +22,8 @@ dp = Dispatcher(storage=MemoryStorage())
 # Создание таблиц в базе данных SQLite
 sql.create_tables()
 
+# Создание папки для папок, в которых хранятся файлы из тикетов
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 @dp.message(Command('start'))
 async def send_start(message: types.Message):
@@ -127,6 +132,16 @@ def new_ticket(tg_id):
     builder.button(text="⬅️ Назад", callback_data="main_menu")
     keyboard = builder.as_markup()
     return text, keyboard 
+
+
+def new_ticket_add_file(tg_id):
+    last_ticket = sql.get_last_ticket_in_progress_by_user_id(tg_id)
+    text = (f"<b>Добавление файлов к заявке</b>\n\n"
+            f"Прикрепите файлы к заявке # {last_ticket[0]}. Если все файлы добавлены, нажмите \"далее\"")
+    builder = InlineKeyboardBuilder()
+    builder.button(text="➡️ Далее", callback_data="main_menu")
+    keyboard = builder.as_markup()
+    return text, keyboard
 
 
 def my_ticket(tg_id):
@@ -249,11 +264,13 @@ def edit_company_phone(tg_id):
     builder.button(text="⬅️ Назад", callback_data="my_company")
     keyboard = builder.as_markup()
     return text, keyboard
-      
-def done_ticket(tg_id):
+
+
+def done_ticket(tg_id, ticket_id):
     last_ticket_number = sql.get_last_ticket_number()   
-    text = f'🎉🥳 Успех, ваша заявка зарегистрирована! \n\n<b>Номер заявки: </b><code>#{last_ticket_number}</code>. \n\n<i>PS: Отслеживайте статус поставленных задач в разделе</i> <b>"📥 Мои заявки"</b>'
+    text = f'🎉🥳 Успех, ваша заявка зарегистрирована!\n Дополнительно можете прикрепить к заявке файлы (скриншоты, логи) \n\n<b>Номер заявки: </b><code>#{ticket_id}</code>. \n\n<i>PS: Отслеживайте статус поставленных задач в разделе</i> <b>"📥 Мои заявки"</b>'
     builder = InlineKeyboardBuilder()
+    builder.button(text="📂 Добавить файлы", parse_mode="HTML", callback_data="new_ticket_add_file")
     builder.button(text="🧑‍💻 Главное меню", parse_mode="HTML", callback_data="main_menu")
     keyboard = builder.as_markup()
     return text, keyboard
@@ -278,6 +295,35 @@ def admin_panel():
     keyboard = builder.as_markup()
     return text, keyboard
 
+
+async def save_file(file_id: str, file_name: str, ticket_id: str, message: types.Message):
+    """Функция для скачивания файла и сохранения его на диск"""
+    file_info = await bot.get_file(file_id)
+
+    # Формируем путь для сохранения файла
+    file_path = file_info.file_path
+    file_url = f"https://api.telegram.org/file/bot{bot.token}/{file_path}"
+    ticket_local_folder = os.path.join(UPLOAD_FOLDER, ticket_id)
+    file_local_path = os.path.join(ticket_local_folder, file_name)
+
+    # Если нет папки для данного тикета, то создаем её
+    if not os.path.exists(ticket_local_folder):
+        os.makedirs(ticket_local_folder)
+
+    # Проверяем, что такого файла ещё нет. Если есть, то переименовываем файл для записи
+    while os.path.exists(file_local_path):
+        base_name, ext = os.path.splitext(file_local_path)
+        file_local_path = base_name + '_' + ext
+
+    # Скачиваем файл с помощью aiohttp
+    async with aiohttp.ClientSession() as session:
+        async with session.get(file_url) as response:
+            if response.status == 200:
+                with open(file_local_path, "wb") as f:
+                    f.write(await response.read())
+                await message.answer(f"Файл '{file_name}' успешно сохранен!")
+            else:
+                await message.answer("Не удалось скачать файл.")
 
 
 @dp.callback_query(lambda query: query.data.startswith(('ticket_', 'my_ticket_page_')))
@@ -319,7 +365,6 @@ async def handle_ticket_callback(query: types.CallbackQuery):
         text, keyboard = my_ticket_history(tg_id, page)
         # Редактируем сообщение с новым текстом и клавиатурой
         await query.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
-
 
 
 # Группа колбеков на кнопки
@@ -424,7 +469,14 @@ async def inline_kb_answer_callback_handler(query: types.CallbackQuery):
         await query.answer()
         text, keyboard = new_ticket(tg_id)
         await query.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
-        
+
+    if query.data == 'new_ticket_add_file':
+        # Обновление ячейки 'pos' в базе данных
+        sql.update_pos('new_ticket_add_file', 'tg_id', user_id)
+        await query.answer()
+        text, keyboard = new_ticket_add_file(tg_id)
+        await query.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+
     if query.data == 'my_ticket':
         # Обновление ячейки 'pos' в базе данных
         sql.update_pos('my_ticket', 'tg_id', user_id)
@@ -438,10 +490,7 @@ async def inline_kb_answer_callback_handler(query: types.CallbackQuery):
         await query.answer()
         text, keyboard = my_ticket_history(tg_id)
         await query.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")   
-        
-        
-        
-        
+
 # Обратотка текстовых сообщений
 @dp.message()
 async def handle_text_input(message: types.Message):
@@ -458,6 +507,13 @@ async def handle_text_input(message: types.Message):
     if user_id not in USERS:
         await message.answer("У Вас нет доступа")
         return
+
+    if user_position == "new_ticket_add_file":
+        ticket = sql.get_last_ticket_in_progress_by_user_id(user_id)
+        # Обработка документов
+        if message.document:
+            await save_file(file_id=message.document.file_id, file_name=message.document.file_name, ticket_id=str(ticket[0]), message=message)
+
 
     if user_position.startswith('ticket_details_'):
         parts = user_position.split('_')
@@ -498,7 +554,7 @@ async def handle_text_input(message: types.Message):
         sql.update_profile_data(user_id, 'organization_phone', message.text)
         text, keyboard = my_company(user_id)
         await message.reply(text, reply_markup=keyboard, parse_mode="HTML")
-        
+
     if user_position == 'new_ticket':
         user_ticket = user_id
         organization = organization_name
@@ -521,7 +577,7 @@ async def handle_text_input(message: types.Message):
             
 
             # Меню благодарочки
-            text, keyboard = done_ticket(user_id)
+            text, keyboard = done_ticket(user_id, last_ticket_number)
             await message.reply(text, reply_markup=keyboard, parse_mode="HTML")
 
             builder = InlineKeyboardBuilder()
