@@ -4,7 +4,7 @@ import aiohttp
 from aiogram import Bot, Dispatcher, types
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.filters import Command
-from aiogram.types import InlineKeyboardButton
+from aiogram.types import InlineKeyboardButton, InputMediaDocument, FSInputFile
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from app import sql
@@ -137,9 +137,12 @@ def new_ticket(tg_id):
 def new_ticket_add_file(tg_id):
     last_ticket = sql.get_last_ticket_in_progress_by_user_id(tg_id)
     text = (f"<b>Добавление файлов к заявке</b>\n\n"
-            f"Прикрепите файлы к заявке # {last_ticket[0]}. Если все файлы добавлены, нажмите \"далее\"")
+            f"Прикрепите файлы к заявке # {last_ticket[0]}.\n"
+            f"Если все файлы добавлены, нажмите \"далее\"\n\n"
+            f"⚠️ <b>Внимание!</b> Файлы следует прикреплять как документы — вторая строка сверху в меню прикрепления файлов, — даже если это картинки!"
+            f"В мобильной версии - иконка \"File\" внизу экрана")
     builder = InlineKeyboardBuilder()
-    builder.button(text="➡️ Далее", callback_data="main_menu")
+    builder.button(text="‍🧑‍💻 Главное меню", callback_data="main_menu")
     keyboard = builder.as_markup()
     return text, keyboard
 
@@ -267,31 +270,10 @@ def edit_company_phone(tg_id):
 
 
 def done_ticket(tg_id, ticket_id):
-    last_ticket_number = sql.get_last_ticket_number()   
-    text = f'🎉🥳 Успех, ваша заявка зарегистрирована!\n Дополнительно можете прикрепить к заявке файлы (скриншоты, логи) \n\n<b>Номер заявки: </b><code>#{ticket_id}</code>. \n\n<i>PS: Отслеживайте статус поставленных задач в разделе</i> <b>"📥 Мои заявки"</b>'
+    text = f'🎉🥳 Успех, ваша заявка зарегистрирована!\n\nЧто бы прикрепить файлы к заявке, нажмите кнопку ниже\n\n<b>Номер заявки: </b><code>#{ticket_id}</code>. \n\n<i>PS: Отслеживайте статус поставленных задач в разделе</i> <b>"📥 Мои заявки"</b>'
     builder = InlineKeyboardBuilder()
     builder.button(text="📂 Добавить файлы", parse_mode="HTML", callback_data="new_ticket_add_file")
     builder.button(text="🧑‍💻 Главное меню", parse_mode="HTML", callback_data="main_menu")
-    keyboard = builder.as_markup()
-    return text, keyboard
-
-
-# Административный раздел
-def admin_panel():
-    total_open_tickets = sql.get_total_tickets_by_status_admin("В работе")  # Получаем общее количество заявок "В работе"
-    total_closed_tickets = sql.get_total_tickets_by_status_admin("Завершена")  # Получаем общее количество завершенных заявок
-    all_tickets_in_progress = sql.get_all_tickets_in_progress()
-    
-    text = f"<b>🤘 Тикет меню 💲</b>\n\n"
-    text += f"<b>🔥Заявок в работе:</b> {total_open_tickets}\n"
-    text += f"<b>👍Завершенных заявок:</b> {total_closed_tickets}\n\n"
-    text += f"<b>⚠️ Внимание!</b> <i>Закрытые задачи не могут быть возвращены в работу. Пожалуйста, будьте внимательны при их закрытии!</i>"
-
-    builder = InlineKeyboardBuilder()
-    for ticket in all_tickets_in_progress:
-        ticket_info = f"Заявка #{ticket[0]} - {ticket[5]}"  # Номер и описание заявки
-        builder.row(InlineKeyboardButton(text=ticket_info, callback_data=f"ticket_{ticket[0]}"))
-    builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu"))
     keyboard = builder.as_markup()
     return text, keyboard
 
@@ -326,7 +308,38 @@ async def save_file(file_id: str, file_name: str, ticket_id: str, message: types
                 await message.answer("Не удалось скачать файл.")
 
 
-@dp.callback_query(lambda query: query.data.startswith(('ticket_', 'my_ticket_page_')))
+def get_files_in_directory(directory: str):
+    """Возвращает список путей ко всем файлам в папке"""
+    return [os.path.join(directory, file) for file in os.listdir(directory) if os.path.isfile(os.path.join(directory, file))]
+
+
+def check_dir_presence(ticket_id):
+    """проверяет, есть ли такая папка"""
+    folder_path = os.path.join(UPLOAD_FOLDER, ticket_id)
+    return os.path.exists(folder_path)
+
+# Административный раздел
+def admin_panel():
+    total_open_tickets = sql.get_total_tickets_by_status_admin("В работе")  # Получаем общее количество заявок "В работе"
+    total_closed_tickets = sql.get_total_tickets_by_status_admin("Завершена")  # Получаем общее количество завершенных заявок
+    all_tickets_in_progress = sql.get_all_tickets_in_progress()
+    
+    text = f"<b>🤘 Тикет меню 💲</b>\n\n"
+    text += f"<b>🔥Заявок в работе:</b> {total_open_tickets}\n"
+    text += f"<b>👍Завершенных заявок:</b> {total_closed_tickets}\n\n"
+    text += f"<b>⚠️ Внимание!</b> <i>Закрытые задачи не могут быть возвращены в работу. Пожалуйста, будьте внимательны при их закрытии!</i>"
+
+    builder = InlineKeyboardBuilder()
+    for ticket in all_tickets_in_progress:
+        ticket_info = f"Заявка #{ticket[0]} - {ticket[5]}"  # Номер и описание заявки
+        if check_dir_presence(str(ticket[0])):
+            ticket_info += " Есть файлы"
+        builder.row(InlineKeyboardButton(text=ticket_info, callback_data=f"ticket_{ticket[0]}"))
+    builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu"))
+    keyboard = builder.as_markup()
+    return text, keyboard
+
+@dp.callback_query(lambda query: query.data.startswith(('ticket_', 'my_ticket_page_', 'get_files_')))
 async def handle_ticket_callback(query: types.CallbackQuery):
     user_id = query.from_user.id
     tg_id = user_id
@@ -352,11 +365,33 @@ async def handle_ticket_callback(query: types.CallbackQuery):
                f"<em>⚠️ Для завершения задачи введите комментарий. В ответ вам придет сообщение с подтвержением!</em>"
 
         builder = InlineKeyboardBuilder()
-        builder.button(text="⬅️ Назад", callback_data="admin_panel")
+        if check_dir_presence(ticket_id):
+            builder.row(InlineKeyboardButton(text="📂 Получить файлы", callback_data="get_files_" + ticket_id))
+        builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_panel"))
         keyboard_markup = builder.as_markup()
         await query.message.edit_text(text, reply_markup=keyboard_markup, parse_mode="HTML")
-    
-    
+
+    if query.data.startswith('get_files_'):
+        tg_id = query.from_user.id
+        ticket_id = query.data.split('_')[-1]
+        folder_path = os.path.join(UPLOAD_FOLDER, ticket_id)
+
+        if not os.path.exists(folder_path):
+            await bot.send_message(chat_id=tg_id, text="Папка с файлами не обнаружена")
+            return
+
+        file_paths = get_files_in_directory(folder_path)
+        if not file_paths:
+            await bot.send_message(chat_id=tg_id, text="Файлы не обнаружены")
+            return
+
+        # Отправляем файлами по 10 штук
+        for i in range(0, len(file_paths), 10):
+            media_group = [
+                InputMediaDocument(media=FSInputFile(file)) for file in file_paths[i:i + 10]
+            ]
+            await bot.send_media_group(chat_id=tg_id, media=media_group)
+
     if query.data.startswith('my_ticket_page_'):
         page = int(query.data.split('_')[3])  # Получаем номер страницы из колбека
         await query.answer()                  # Ответим на колбек, чтобы убрать "крутилку"
@@ -591,7 +626,8 @@ async def handle_text_input(message: types.Message):
                         f"<b>Компания:</b> {organization}\n"
                         f"<b>Адрес:</b> {addres_ticket}\n"
             )
-            
+
+            sql.update_pos('ticket_created', 'tg_id', user_id)
             # Добавляем клавиатуру к уведомлению
             await bot.send_message(ADMIN_MESSAGE, admin_text, parse_mode="HTML", reply_markup=keyboard_markup)
         else:
