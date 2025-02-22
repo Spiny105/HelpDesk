@@ -270,7 +270,10 @@ def edit_company_phone(tg_id):
 
 
 def done_ticket(tg_id, ticket_id):
-    text = f'🎉🥳 Успех, ваша заявка зарегистрирована!\n\nЧто бы прикрепить файлы к заявке, нажмите кнопку ниже\n\n<b>Номер заявки: </b><code>#{ticket_id}</code>. \n\n<i>PS: Отслеживайте статус поставленных задач в разделе</i> <b>"📥 Мои заявки"</b>'
+    text = (f'🎉🥳 Успех, ваша заявка зарегистрирована!\n\n'
+            f'Что бы прикрепить файлы к заявке, нажмите кнопку \"Добавить файлы\"\n\n'
+            f'<b>Номер заявки: </b><code>#{ticket_id}</code>.\n\n'
+            f'<i>PS: Отслеживайте статус поставленных задач в разделе</i> <b>"📥 Мои заявки"</b>')
     builder = InlineKeyboardBuilder()
     builder.button(text="📂 Добавить файлы", parse_mode="HTML", callback_data="new_ticket_add_file")
     builder.button(text="🧑‍💻 Главное меню", parse_mode="HTML", callback_data="main_menu")
@@ -548,6 +551,8 @@ async def handle_text_input(message: types.Message):
         # Обработка документов
         if message.document:
             await save_file(file_id=message.document.file_id, file_name=message.document.file_name, ticket_id=str(ticket[0]), message=message)
+        else:
+            await message.answer("Отправьте файл как документ")
 
 
     if user_position.startswith('ticket_details_'):
