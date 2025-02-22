@@ -8,7 +8,7 @@ from aiogram.types import InlineKeyboardButton, InputMediaDocument, FSInputFile
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from app import sql
-from config import ADMIN_USERS, ADMIN_MESSAGE, BOT_TOKEN, USERS, UPLOAD_FOLDER
+from config import ADMIN_USERS, ADMIN_MESSAGE, BOT_TOKEN, USERS, UPLOAD_FOLDER, TIME_ZONE
 import datetime
 
 import asyncio
@@ -138,7 +138,7 @@ def new_ticket_add_file(tg_id):
     last_ticket = sql.get_last_ticket_in_progress_by_user_id(tg_id)
     text = (f"<b>Добавление файлов к заявке</b>\n\n"
             f"Прикрепите файлы к заявке # {last_ticket[0]}.\n"
-            f"Если все файлы добавлены, нажмите \"далее\"\n\n"
+            f"Если все файлы добавлены, нажмите \"Главное меню\"\n\n"
             f"⚠️ <b>Внимание!</b> Файлы следует прикреплять как документы — вторая строка сверху в меню прикрепления файлов, — даже если это картинки!"
             f"В мобильной версии - иконка \"File\" внизу экрана")
     builder = InlineKeyboardBuilder()
@@ -439,7 +439,7 @@ async def inline_kb_answer_callback_handler(query: types.CallbackQuery):
         ticket_comm_done = sql.read_ticket_comment(int(ticket_id))
         ticket_info = sql.get_ticket_info(int(ticket_id))
             
-        current_time = datetime.datetime.now(datetime.timezone.utc)
+        current_time = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=TIME_ZONE)))
         time_ticket = datetime.datetime.fromisoformat(ticket_info[5])
         time_difference = current_time - time_ticket
         
@@ -600,7 +600,7 @@ async def handle_text_input(message: types.Message):
         organization = organization_name
         addres_ticket = organization_address
         message_ticket = message.text
-        time_ticket = message.date
+        time_ticket = message.date.astimezone(datetime.timezone(datetime.timedelta(hours=TIME_ZONE)))
         state_ticket = "В работе"
         ticket_comm = ""
 
