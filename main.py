@@ -321,7 +321,7 @@ def check_dir_presence(ticket_id):
     folder_path = os.path.join(UPLOAD_FOLDER, ticket_id)
     return os.path.exists(folder_path)
 
-# Административный раздел
+# Административный раздел. Главное меню
 def admin_panel():
     total_open_tickets = sql.get_total_tickets_by_status_admin("В работе")  # Получаем общее количество заявок "В работе"
     total_closed_tickets = sql.get_total_tickets_by_status_admin("Завершена")  # Получаем общее количество завершенных заявок
@@ -338,9 +338,58 @@ def admin_panel():
         if check_dir_presence(str(ticket[0])):
             ticket_info += " Есть файлы"
         builder.row(InlineKeyboardButton(text=ticket_info, callback_data=f"ticket_{ticket[0]}"))
+    builder.row(InlineKeyboardButton(text="✅ Закрытые задачи", callback_data="admin_closed_tickets"))
     builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu"))
     keyboard = builder.as_markup()
     return text, keyboard
+
+
+def admin_closed_tickets():
+    total_closed_tickets = sql.get_total_tickets_by_status_admin("Завершена")
+    all_closed_tickets = sql.get_all_closed_tickets()
+
+    text = f"<b>👍Завершенных заявок:</b> {total_closed_tickets}\n\n"
+
+    builder = InlineKeyboardBuilder()
+    for ticket in all_closed_tickets:
+        ticket_info = f"Заявка #{ticket[0]} - {ticket[5]}"  # Номер и описание заявки
+        if check_dir_presence(str(ticket[0])):
+            ticket_info += " Есть файлы"
+        builder.row(InlineKeyboardButton(text=ticket_info, callback_data=f"closed_ticket_{ticket[0]}"))
+    builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_panel"))
+    keyboard = builder.as_markup()
+    return text, keyboard
+
+
+@dp.callback_query(lambda query: query.data.startswith('closed_ticket_'))
+async def handle_ticket_callback(query: types.CallbackQuery):
+    user_id = query.from_user.id
+    tg_id = user_id
+
+    # Проверяем, может ли этот пользователь писать боту
+    if user_id not in USERS:
+        await query.answer("У Вас нет доступа")
+        return
+
+    if query.data.startswith('closed_ticket_'):
+        ticket_id = query.data.split('_')[-1]
+        ticket_info = sql.get_ticket_info(int(ticket_id))
+        sql.update_pos(f'ticket_details_{ticket_info[0]}', 'tg_id', user_id)
+        await query.answer()
+        text = f"<b>Детали заявки:</b> <code>#{ticket_info[0]}\n\n</code>" \
+               f"<b>Пользователь ID:</b> <a href='tg://user?id={ticket_info[1]}'>{ticket_info[1]}</a>\n" \
+               f"<b>Организация:</b> {ticket_info[2]}\n" \
+               f"<b>Адрес:</b> {ticket_info[3]}\n\n" \
+               f"<b>Сообщение от пользователя:</b> - <em>{ticket_info[4]}</em>\n\n" \
+               f"<b>Время создания:</b> {ticket_info[5]}\n" \
+               f"<b>Статус:</b> {ticket_info[6]}\n\n"
+        builder = InlineKeyboardBuilder()
+        if check_dir_presence(ticket_id):
+            builder.row(InlineKeyboardButton(text="📂 Получить файлы", callback_data="get_files_" + ticket_id))
+        builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_panel"))
+        keyboard_markup = builder.as_markup()
+        await query.message.edit_text(text, reply_markup=keyboard_markup, parse_mode="HTML")
+
 
 @dp.callback_query(lambda query: query.data.startswith(('ticket_', 'my_ticket_page_', 'get_files_')))
 async def handle_ticket_callback(query: types.CallbackQuery):
@@ -422,6 +471,14 @@ async def inline_kb_answer_callback_handler(query: types.CallbackQuery):
         await query.answer()
         text, keyboard = admin_panel()
         await query.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+
+    if query.data == 'admin_closed_tickets':
+        # Обновление ячейки 'pos' в базе данных
+        sql.update_pos('admin_closed_tickets', 'tg_id', user_id)
+        await query.answer()
+        text, keyboard = admin_closed_tickets()
+        await query.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+
 
     if query.data == 'main_menu':
         # Обновление ячейки 'pos' в базе данных

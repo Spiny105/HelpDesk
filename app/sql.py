@@ -280,6 +280,21 @@ def get_all_tickets_in_progress():
     return all_tickets_in_progress
 
 
+def get_all_closed_tickets():
+    """
+        Возвращает список всех выполненных заявок
+
+        Returns:
+            list: Список кортежей с данными о тикетах.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM ticket WHERE state_ticket=? ORDER BY number_ticket', ("Завершена",))
+    all_closed_tickets = cursor.fetchall()
+    conn.close()
+    return all_closed_tickets
+
+
 def get_ticket_info(ticket_id):
     """
     Возвращает информацию о заданном тикете.
