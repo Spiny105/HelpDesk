@@ -1,6 +1,8 @@
 import os
 
 import aiohttp
+import pandas as pd
+
 from aiogram import Bot, Dispatcher, types
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.filters import Command
@@ -339,6 +341,7 @@ def admin_panel():
             ticket_info += " Есть файлы"
         builder.row(InlineKeyboardButton(text=ticket_info, callback_data=f"ticket_{ticket[0]}"))
     builder.row(InlineKeyboardButton(text="✅ Закрытые задачи", callback_data="admin_closed_tickets"))
+    builder.row(InlineKeyboardButton(text="🗒 Распечатка задач", callback_data="print_all_tasks"))
     builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu"))
     keyboard = builder.as_markup()
     return text, keyboard
@@ -452,6 +455,49 @@ async def handle_ticket_callback(query: types.CallbackQuery):
         text, keyboard = my_ticket_history(tg_id, page)
         # Редактируем сообщение с новым текстом и клавиатурой
         await query.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+
+
+@dp.callback_query(lambda query: query.data.startswith('print_all_tasks'))
+async def print_all_tasks(query: types.CallbackQuery):
+    user_id = query.from_user.id
+    tg_id = user_id
+
+    # Проверяем, может ли этот пользователь писать боту
+    if user_id not in USERS:
+        await query.answer("У Вас нет доступа")
+        return
+
+    # Формируем данные для отправки
+    all_tickets = sql.get_all_tickets()
+
+    number_ticket_lst = list(map(lambda x: x[0], all_tickets))
+    tg_id_ticket_lst = list(map(lambda x: x[1], all_tickets))
+    organization_lst = list(map(lambda x: x[2], all_tickets))
+    addres_ticket_lst = list(map(lambda x: x[3], all_tickets))
+    message_ticket_lst = list(map(lambda x: x[4], all_tickets))
+    time_ticket_lst = list(map(lambda x: x[5], all_tickets))
+    state_ticket_lst = list(map(lambda x: x[6], all_tickets))
+    ticket_comm_lst = list(map(lambda x: x[7], all_tickets))
+
+    xcel_data = {"number_ticket": number_ticket_lst,
+                 "tg_id_ticket": tg_id_ticket_lst,
+                 "organization": organization_lst,
+                 "addres_ticket": addres_ticket_lst,
+                 "message_ticket": message_ticket_lst,
+                 "time_ticket": time_ticket_lst,
+                 "state_ticket": state_ticket_lst,
+                 "ticket_comm": ticket_comm_lst
+                 }
+
+    df = pd.DataFrame(xcel_data)
+
+    # Сохраняем в Excel
+    file_name = "output.xlsx"
+    df.to_excel(file_name, index=False, engine="openpyxl")
+
+    # Отправить файл в чат
+    document = FSInputFile(file_name)
+    await bot.send_document(chat_id=tg_id, document=document, caption="Список всех задач из БД:")
 
 
 # Группа колбеков на кнопки

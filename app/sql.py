@@ -265,6 +265,21 @@ def read_profile(tg_id):
     return None
 
 
+def get_all_tickets():
+    """
+        Возвращает список всех тикетов
+
+        Returns:
+            list: Список кортежей с данными о тикетах.
+        """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM ticket ORDER BY number_ticket')
+    all_tickets = cursor.fetchall()
+    conn.close()
+    return all_tickets
+
+
 def get_all_tickets_in_progress():
     """
     Возвращает список всех тикетов, находящихся в процессе выполнения.
