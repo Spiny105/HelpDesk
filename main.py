@@ -88,7 +88,48 @@ async def send_start(message: types.Message):
         keyboard = builder.as_markup()
         await message.answer(text_user, reply_markup=keyboard, parse_mode="HTML")
        
-    
+# Операции с файлами
+async def save_file(file_id: str, file_name: str, ticket_id: str, message: types.Message):
+    """Функция для скачивания файла и сохранения его на диск"""
+    file_info = await bot.get_file(file_id)
+
+    # Формируем путь для сохранения файла
+    file_path = file_info.file_path
+    file_url = f"https://api.telegram.org/file/bot{bot.token}/{file_path}"
+    ticket_local_folder = os.path.join(UPLOAD_FOLDER, ticket_id)
+    file_local_path = os.path.join(ticket_local_folder, file_name)
+
+    # Если нет папки для данного тикета, то создаем её
+    if not os.path.exists(ticket_local_folder):
+        os.makedirs(ticket_local_folder)
+
+    # Проверяем, что такого файла ещё нет. Если есть, то переименовываем файл для записи
+    while os.path.exists(file_local_path):
+        base_name, ext = os.path.splitext(file_local_path)
+        file_local_path = base_name + '_' + ext
+
+    # Скачиваем файл с помощью aiohttp
+    async with aiohttp.ClientSession() as session:
+        async with session.get(file_url) as response:
+            if response.status == 200:
+                with open(file_local_path, "wb") as f:
+                    f.write(await response.read())
+                await message.answer(f"Файл '{file_name}' успешно сохранен!")
+            else:
+                await message.answer("Не удалось скачать файл.")
+
+
+def get_files_in_directory(directory: str):
+    """Возвращает список путей ко всем файлам в папке"""
+    return [os.path.join(directory, file) for file in os.listdir(directory) if os.path.isfile(os.path.join(directory, file))]
+
+
+def check_dir_presence(ticket_id):
+    """проверяет, есть ли такая папка"""
+    folder_path = os.path.join(UPLOAD_FOLDER, ticket_id)
+    return os.path.exists(folder_path)
+
+
 # Главное меню пользователя мимикрия под /start
 def main_menu(tg_id):
     sql.update_pos('main_menu', 'tg_id', tg_id)
@@ -282,47 +323,6 @@ def done_ticket(tg_id, ticket_id):
     keyboard = builder.as_markup()
     return text, keyboard
 
-
-async def save_file(file_id: str, file_name: str, ticket_id: str, message: types.Message):
-    """Функция для скачивания файла и сохранения его на диск"""
-    file_info = await bot.get_file(file_id)
-
-    # Формируем путь для сохранения файла
-    file_path = file_info.file_path
-    file_url = f"https://api.telegram.org/file/bot{bot.token}/{file_path}"
-    ticket_local_folder = os.path.join(UPLOAD_FOLDER, ticket_id)
-    file_local_path = os.path.join(ticket_local_folder, file_name)
-
-    # Если нет папки для данного тикета, то создаем её
-    if not os.path.exists(ticket_local_folder):
-        os.makedirs(ticket_local_folder)
-
-    # Проверяем, что такого файла ещё нет. Если есть, то переименовываем файл для записи
-    while os.path.exists(file_local_path):
-        base_name, ext = os.path.splitext(file_local_path)
-        file_local_path = base_name + '_' + ext
-
-    # Скачиваем файл с помощью aiohttp
-    async with aiohttp.ClientSession() as session:
-        async with session.get(file_url) as response:
-            if response.status == 200:
-                with open(file_local_path, "wb") as f:
-                    f.write(await response.read())
-                await message.answer(f"Файл '{file_name}' успешно сохранен!")
-            else:
-                await message.answer("Не удалось скачать файл.")
-
-
-def get_files_in_directory(directory: str):
-    """Возвращает список путей ко всем файлам в папке"""
-    return [os.path.join(directory, file) for file in os.listdir(directory) if os.path.isfile(os.path.join(directory, file))]
-
-
-def check_dir_presence(ticket_id):
-    """проверяет, есть ли такая папка"""
-    folder_path = os.path.join(UPLOAD_FOLDER, ticket_id)
-    return os.path.exists(folder_path)
-
 # Административный раздел. Главное меню
 def admin_panel():
     total_open_tickets = sql.get_total_tickets_by_status_admin("В работе")  # Получаем общее количество заявок "В работе"
@@ -377,7 +377,7 @@ async def handle_ticket_callback(query: types.CallbackQuery):
     if query.data.startswith('closed_ticket_'):
         ticket_id = query.data.split('_')[-1]
         ticket_info = sql.get_ticket_info(int(ticket_id))
-        sql.update_pos(f'ticket_details_{ticket_info[0]}', 'tg_id', user_id)
+        sql.update_pos(f'closed_ticket_details_{ticket_info[0]}', 'tg_id', user_id)
         await query.answer()
         text = f"<b>Детали заявки:</b> <code>#{ticket_info[0]}\n\n</code>" \
                f"<b>Пользователь ID:</b> <a href='tg://user?id={ticket_info[1]}'>{ticket_info[1]}</a>\n" \
