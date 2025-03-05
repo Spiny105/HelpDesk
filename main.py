@@ -27,6 +27,21 @@ sql.create_tables()
 # Создание папки для папок, в которых хранятся файлы из тикетов
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
+# Проверка прав доступа
+def check_rights(user_id, is_from_admin_page):
+    # Проверяем, может ли этот пользователь писать боту
+    if user_id not in USERS:
+        return False
+
+    # Проверяем, является ли пользователь администратором
+    if is_from_admin_page:
+        if user_id not in ADMIN_USERS:
+            return False
+
+    # се проверки пройдены
+    return True
+
+
 @dp.message(Command('start'))
 async def send_start(message: types.Message):
     user_id = message.from_user.id
@@ -34,7 +49,7 @@ async def send_start(message: types.Message):
     user = sql.get_user_by_id(user_id)
 
     # Проверяем, может ли этот пользователь писать боту
-    if user_id not in USERS:
+    if not check_rights(user_id=user_id, is_from_admin_page=False):
         await message.answer("У Вас нет доступа")
         return
 
@@ -370,7 +385,7 @@ async def handle_ticket_callback(query: types.CallbackQuery):
     tg_id = user_id
 
     # Проверяем, может ли этот пользователь писать боту
-    if user_id not in USERS:
+    if not check_rights(user_id=user_id, is_from_admin_page=False):
         await query.answer("У Вас нет доступа")
         return
 
@@ -400,7 +415,7 @@ async def handle_ticket_callback(query: types.CallbackQuery):
     tg_id = user_id
 
     # Проверяем, может ли этот пользователь писать боту
-    if user_id not in USERS:
+    if not check_rights(user_id=user_id, is_from_admin_page=False):
         await query.answer("У Вас нет доступа")
         return
     
@@ -463,7 +478,7 @@ async def print_all_tasks(query: types.CallbackQuery):
     tg_id = user_id
 
     # Проверяем, может ли этот пользователь писать боту
-    if user_id not in USERS:
+    if not check_rights(user_id=user_id, is_from_admin_page=True):
         await query.answer("У Вас нет доступа")
         return
 
