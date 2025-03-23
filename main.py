@@ -27,6 +27,21 @@ sql.create_tables()
 # Создание папки для папок, в которых хранятся файлы из тикетов
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
+# Проверка прав доступа
+def check_rights(user_id, is_from_admin_page):
+    # Проверяем, может ли этот пользователь писать боту
+    if user_id not in USERS:
+        return False
+
+    # Проверяем, является ли пользователь администратором
+    if is_from_admin_page:
+        if user_id not in ADMIN_USERS:
+            return False
+
+    # се проверки пройдены
+    return True
+
+
 @dp.message(Command('start'))
 async def send_start(message: types.Message):
     user_id = message.from_user.id
@@ -34,7 +49,7 @@ async def send_start(message: types.Message):
     user = sql.get_user_by_id(user_id)
 
     # Проверяем, может ли этот пользователь писать боту
-    if user_id not in USERS:
+    if not check_rights(user_id=user_id, is_from_admin_page=False):
         await message.answer("У Вас нет доступа")
         return
 
@@ -199,7 +214,7 @@ def my_ticket(tg_id):
     organization_address = profile.get("organization_adress")
     
     if user_tickets_in_progress:
-        text = (f"<b>📥 Мои заявки в работе</b>\n\n"
+        text = (f"<b>📥 Все заявки</b>\n\n"
                      f"<b>Компания:</b> {organization}\n"
                      f"<b>Адрес заявки:</b> {organization_address}\n" 
                      f"<b>Заявок в работе:</b> {open_ticket}\n\n"
@@ -215,11 +230,50 @@ def my_ticket(tg_id):
         text = '<b>📥 Мои заявки </b>\n\nУ вас пока нет заявок в работе..  🤷‍♂️ \n- <i>Что бы оставить заявку воспользуйтесь меню </i><b>"📤 Новая заявка"</b>'
 
     builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🛠 Заявки в работе", callback_data="my_ticket_in_progress"))
     builder.row(InlineKeyboardButton(text="☑️ История заявок", callback_data="my_ticket_history"))
     builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu"))
     keyboard = builder.as_markup()
     return text, keyboard
 
+
+def my_ticket_all_in_progress_detailed(tg_id, page=1, page_size=4):
+    tasks_in_progress = sql.get_tickets_in_progress_by_user_id(tg_id)
+    # Проверяем, есть ли завершенные заявки
+    if tasks_in_progress:
+        # Проверяем, нужна ли пагинация
+        if len(tasks_in_progress) > page_size:
+            start_index = (page - 1) * page_size
+            end_index = start_index + page_size
+            current_page_tickets = tasks_in_progress[start_index:end_index]
+            text = f"<b>📨 Ваши заявки (страница {page}):</b>\n\n"
+        else:
+            current_page_tickets = tasks_in_progress
+            text = "<b>📨 Ваши заявки :</b>\n\n"
+
+        for ticket in current_page_tickets:
+            comments = sql.get_comments(ticket[0])
+            text += f"✅\n" \
+                    f"<b>├ Номер заявки:</b> <code>#{ticket[0]}</code>\n" \
+                    f"<b>├ Время создания:</b> {ticket[5]}\n" \
+                    f"<b>├ Описание:</b> - <em>{ticket[4]}</em>\n"
+            for comment in comments:
+                text += f"<b>├ {comment[1]}</b> <em>{comment[3]}</em>\n"
+            text += "\n\n"
+    else:
+        text = "Заявок в работе нет 🤷‍♂️"
+
+    builder = InlineKeyboardBuilder()
+    # Создаем кнопки для навигации по страницам, если нужно
+    if len(tasks_in_progress) > page_size:
+        if page > 1:
+            builder.button(text="🔙 Предыдущая", callback_data=f"my_ticket_in_progress_page_{page - 1}")
+        if end_index < len(tasks_in_progress):
+            builder.button(text="🔜 Следующая", callback_data=f"my_ticket_in_progress_page_{page + 1}")
+    # Добавляем кнопку "Назад"
+    builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="my_ticket"))
+    keyboard = builder.as_markup()
+    return text, keyboard
 
 def my_ticket_history(tg_id, page=1, page_size=4):
     completed_tickets = sql.get_completed_tickets_by_user(tg_id)
@@ -236,11 +290,14 @@ def my_ticket_history(tg_id, page=1, page_size=4):
             text = "<b>📨 История ваших завершенных заявок:</b>\n\n"
         
         for ticket in current_page_tickets:
+            comments = sql.get_comments(ticket[0])
             text += f"✅\n" \
                     f"<b>├ Номер заявки:</b> <code>#{ticket[0]}</code>\n" \
                     f"<b>├ Время создания:</b> {ticket[5]}\n" \
-                    f"<b>├ Сообщение:</b> - <em>{ticket[4]}</em>\n" \
-                    f"<b>└ Комментарий исполнителя:</b>  - <em>{ticket[7]}</em>\n\n"
+                    f"<b>├ Описание:</b> - <em>{ticket[4]}</em>\n"
+            for comment in comments:
+                text += f"<b>├ {comment[1]}</b> <em>{comment[3]}</em>\n"
+            text += f"<b>└ Комментарий при завершении:</b>  - <em>{ticket[7]}</em>\n\n"
                     
     else:
         text = "🤷‍♂️ Упс.. У вас нет истории заявок."
@@ -253,6 +310,23 @@ def my_ticket_history(tg_id, page=1, page_size=4):
         if end_index < len(completed_tickets):
             builder.button(text="🔜 Следующая", callback_data=f"my_ticket_page_{page + 1}")
     # Добавляем кнопку "Назад"
+    builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="my_ticket"))
+    keyboard = builder.as_markup()
+    return text, keyboard
+
+
+def my_ticket_in_progress(tg_id):
+    tickets_in_progress = sql.get_tickets_in_progress_by_user_id(tg_id)
+    if tickets_in_progress:
+        text = 'Список открытых задач ⬇️'
+    else:
+        text = "У вас нет открытых задач 🤷‍♂️"
+
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="📚 Подробности", callback_data="my_ticket_all_in_progress_detailed"))
+    for ticket in tickets_in_progress:
+        ticket_info = f"Заявка #{ticket[0]} - {ticket[5]}"  # Номер и описание заявки
+        builder.row(InlineKeyboardButton(text=ticket_info, callback_data=f"my_ticket_in_progress_details_{ticket[0]}"))
     builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="my_ticket"))
     keyboard = builder.as_markup()
     return text, keyboard
@@ -370,7 +444,7 @@ async def handle_ticket_callback(query: types.CallbackQuery):
     tg_id = user_id
 
     # Проверяем, может ли этот пользователь писать боту
-    if user_id not in USERS:
+    if not check_rights(user_id=user_id, is_from_admin_page=False):
         await query.answer("У Вас нет доступа")
         return
 
@@ -394,34 +468,78 @@ async def handle_ticket_callback(query: types.CallbackQuery):
         await query.message.edit_text(text, reply_markup=keyboard_markup, parse_mode="HTML")
 
 
-@dp.callback_query(lambda query: query.data.startswith(('ticket_', 'my_ticket_page_', 'get_files_')))
+@dp.callback_query(lambda query: query.data.startswith(('ticket_',
+                                                        'my_ticket_page_',
+                                                        'my_ticket_in_progress_page_',
+                                                        'get_files_',
+                                                        'admin_close_ticket_',
+                                                        'admin_add_comment_to_ticket_')))
 async def handle_ticket_callback(query: types.CallbackQuery):
     user_id = query.from_user.id
     tg_id = user_id
 
     # Проверяем, может ли этот пользователь писать боту
-    if user_id not in USERS:
+    if not check_rights(user_id=user_id, is_from_admin_page=False):
         await query.answer("У Вас нет доступа")
         return
-    
 
-    if query.data.startswith('ticket_'):
-        ticket_id = query.data.split('_')[1]
+    if query.data.startswith('admin_add_comment_to_ticket_'):
+        ticket_id = query.data.split('_')[-1]
         ticket_info = sql.get_ticket_info(int(ticket_id))
-        sql.update_pos(f'ticket_details_{ticket_info[0]}', 'tg_id', user_id)
+        sql.update_pos(f'admin_add_comment_to_ticket_{ticket_info[0]}', 'tg_id', user_id)
+        await query.answer()
+        text =  f"<b>Номер заявки:</b> <code>#{ticket_info[0]}\n\n</code>" \
+                f"Напишите комментарий к заявке, либо вернитесь в пришлое меню"
+        builder = InlineKeyboardBuilder()
+        builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="ticket_" + ticket_id))
+        keyboard_markup = builder.as_markup()
+        await query.message.edit_text(text, reply_markup=keyboard_markup, parse_mode="HTML")
+
+
+    if query.data.startswith('admin_close_ticket_'):
+        ticket_id = query.data.split('_')[-1]
+        ticket_info = sql.get_ticket_info(int(ticket_id))
+        sql.update_pos(f'admin_close_ticket_{ticket_info[0]}', 'tg_id', user_id)
         await query.answer()
         text = f"<b>Детали заявки:</b> <code>#{ticket_info[0]}\n\n</code>" \
                f"<b>Пользователь ID:</b> <a href='tg://user?id={ticket_info[1]}'>{ticket_info[1]}</a>\n" \
                f"<b>Организация:</b> {ticket_info[2]}\n" \
                f"<b>Адрес:</b> {ticket_info[3]}\n\n" \
-               f"<b>Сообщение от пользователя:</b> - <em>{ticket_info[4]}</em>\n\n" \
+               f"<b>Описание от пользователя:</b> - <em>{ticket_info[4]}</em>\n\n" \
                f"<b>Время создания:</b> {ticket_info[5]}\n" \
                f"<b>Статус:</b> {ticket_info[6]}\n\n" \
                f"<em>⚠️ Для завершения задачи введите комментарий. В ответ вам придет сообщение с подтвержением!</em>"
+        builder = InlineKeyboardBuilder()
+        builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="ticket_" + ticket_id))
+        keyboard_markup = builder.as_markup()
+        await query.message.edit_text(text, reply_markup=keyboard_markup, parse_mode="HTML")
+
+    if query.data.startswith('ticket_'):
+        ticket_id = query.data.split('_')[-1]
+        ticket_info = sql.get_ticket_info(int(ticket_id))
+        sql.update_pos(f'ticket_details_{ticket_info[0]}', 'tg_id', user_id)
+
+        messages = sql.get_comments(ticket_info[0])
+
+        await query.answer()
+        text = f"<b>Детали заявки:</b> <code>#{ticket_info[0]}\n\n</code>" \
+               f"<b>Пользователь ID:</b> <a href='tg://user?id={ticket_info[1]}'>{ticket_info[1]}</a>\n" \
+               f"<b>Организация:</b> {ticket_info[2]}\n" \
+               f"<b>Адрес:</b> {ticket_info[3]}\n\n" \
+               f"<b>Сообщение от пользователя:</b> - <em>{ticket_info[4]}</em>\n\n"
+
+        for message_info in messages:
+            text += f"<b>{message_info[1]}</b> - <em>{message_info[3]}</em>\n"
+
+        text += f"\n" \
+                f"<b>Время создания:</b> {ticket_info[5]}\n" \
+                f"<b>Статус:</b> {ticket_info[6]}"
 
         builder = InlineKeyboardBuilder()
         if check_dir_presence(ticket_id):
             builder.row(InlineKeyboardButton(text="📂 Получить файлы", callback_data="get_files_" + ticket_id))
+        builder.row(InlineKeyboardButton(text="🗒 Добавить комментарий", callback_data="admin_add_comment_to_ticket_" + ticket_id))
+        builder.row(InlineKeyboardButton(text="✅ Закрыть задачу", callback_data="admin_close_ticket_" + ticket_id))
         builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_panel"))
         keyboard_markup = builder.as_markup()
         await query.message.edit_text(text, reply_markup=keyboard_markup, parse_mode="HTML")
@@ -448,11 +566,20 @@ async def handle_ticket_callback(query: types.CallbackQuery):
             await bot.send_media_group(chat_id=tg_id, media=media_group)
 
     if query.data.startswith('my_ticket_page_'):
-        page = int(query.data.split('_')[3])  # Получаем номер страницы из колбека
-        await query.answer()                  # Ответим на колбек, чтобы убрать "крутилку"
+        page = int(query.data.split('_')[-1])   # Получаем номер страницы из колбека
+        await query.answer()                    # Ответим на колбек, чтобы убрать "крутилку"
         tg_id = query.from_user.id
         # Получаем текст сообщения и клавиатуру с учетом текущей страницы
         text, keyboard = my_ticket_history(tg_id, page)
+        # Редактируем сообщение с новым текстом и клавиатурой
+        await query.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+
+    if query.data.startswith('my_ticket_in_progress_page_'):
+        page = int(query.data.split('_')[-1])   # Получаем номер страницы из колбека
+        await query.answer()                    # Ответим на колбек, чтобы убрать "крутилку"
+        tg_id = query.from_user.id
+        # Получаем текст сообщения и клавиатуру с учетом текущей страницы
+        text, keyboard = my_ticket_all_in_progress_detailed(tg_id, page)
         # Редактируем сообщение с новым текстом и клавиатурой
         await query.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
 
@@ -463,7 +590,7 @@ async def print_all_tasks(query: types.CallbackQuery):
     tg_id = user_id
 
     # Проверяем, может ли этот пользователь писать боту
-    if user_id not in USERS:
+    if not check_rights(user_id=user_id, is_from_admin_page=True):
         await query.answer("У Вас нет доступа")
         return
 
@@ -532,7 +659,7 @@ async def inline_kb_answer_callback_handler(query: types.CallbackQuery):
         await query.answer()
         text, keyboard = main_menu(tg_id)
         await query.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
-        
+
     if query.data.startswith('complete_'):   
         ticket_id = query.data.split('_')[1]
         # Обновление ячейки 'pos' в базе данных
@@ -556,7 +683,7 @@ async def inline_kb_answer_callback_handler(query: types.CallbackQuery):
 
         #Клавиатура для пользователя
         builder_user = InlineKeyboardBuilder()
-        builder_user.button(text="☑️ История заявок", callback_data="my_ticket_history")
+        builder_user.button(text="☑️ История заявок (закрытые)", callback_data="my_ticket_history")
         builder_user.button(text="🧑‍💻 Главное меню", callback_data="main_menu")
         keyboard_markup_user = builder_user.as_markup()
 
@@ -630,7 +757,66 @@ async def inline_kb_answer_callback_handler(query: types.CallbackQuery):
         sql.update_pos('my_ticket_history', 'tg_id', user_id)
         await query.answer()
         text, keyboard = my_ticket_history(tg_id)
-        await query.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")   
+        await query.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+
+    if query.data == 'my_ticket_all_in_progress_detailed':
+        # Обновление ячейки 'pos' в базе данных
+        sql.update_pos('my_ticket_all_in_progress_detailed', 'tg_id', user_id)
+        await query.answer()
+        text, keyboard = my_ticket_all_in_progress_detailed(tg_id)
+        await query.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+
+    if query.data == 'my_ticket_in_progress':
+        # Обновление ячейки 'pos' в базе данных
+        sql.update_pos('my_ticket_in_progress', 'tg_id', user_id)
+        await query.answer()
+        text, keyboard = my_ticket_in_progress(tg_id)
+        await query.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+
+    if query.data.startswith('my_ticket_in_progress_details_'):
+        # Обновление ячейки 'pos' в базе данных
+        sql.update_pos('my_ticket_in_progress_details_', 'tg_id', user_id)
+        ticket_id = query.data.split('_')[-1]
+        ticket_info = sql.get_ticket_info(int(ticket_id))
+
+        messages = sql.get_comments(ticket_info[0])
+
+        await query.answer()
+        text = f"<b>Детали заявки:</b> <code>#{ticket_info[0]}\n\n</code>" \
+               f"<b>Пользователь ID:</b> <a href='tg://user?id={ticket_info[1]}'>{ticket_info[1]}</a>\n" \
+               f"<b>Организация:</b> {ticket_info[2]}\n" \
+               f"<b>Адрес:</b> {ticket_info[3]}\n\n" \
+               f"<b>Описание от пользователя:</b> - <em>{ticket_info[4]}</em>\n\n"
+
+        for message_info in messages:
+            text += f"<b>{message_info[1]}</b> - <em>{message_info[3]}</em>\n"
+
+        text += f"\n" \
+                f"<b>Время создания:</b> {ticket_info[5]}\n" \
+                f"<b>Статус:</b> {ticket_info[6]}"
+
+        builder = InlineKeyboardBuilder()
+        builder.row(InlineKeyboardButton(text="🗒 Добавить комментарий",
+                                         callback_data="my_ticket_add_comment_to_ticket_" + ticket_id))
+        builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="my_ticket_in_progress"))
+        keyboard_markup = builder.as_markup()
+        await query.message.edit_text(text, reply_markup=keyboard_markup, parse_mode="HTML")
+
+    if query.data.startswith('my_ticket_add_comment_to_ticket_'):
+        ticket_id = query.data.split('_')[-1]
+        ticket_info = sql.get_ticket_info(int(ticket_id))
+
+        # Обновление ячейки 'pos' в базе данных
+        sql.update_pos(f'my_ticket_add_comment_to_ticket_{ticket_info[0]}', 'tg_id', user_id)
+
+        await query.answer()
+        text = f"<b>Номер заявки:</b> <code>#{ticket_info[0]}\n\n</code>" \
+               f"Напишите комментарий к заявке, либо вернитесь в пришлое меню"
+
+        builder = InlineKeyboardBuilder()
+        builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="my_ticket_in_progress"))
+        keyboard_markup = builder.as_markup()
+        await query.message.edit_text(text, reply_markup=keyboard_markup, parse_mode="HTML")
 
 # Обратотка текстовых сообщений
 @dp.message()
@@ -657,26 +843,56 @@ async def handle_text_input(message: types.Message):
         else:
             await message.answer("Отправьте файл как документ")
 
+    if user_position.startswith("admin_add_comment_to_ticket_"):
 
-    if user_position.startswith('ticket_details_'):
+        # Проверить, что это написал админ
+        if user_id not in ADMIN_USERS:
+            await message.answer("У Вас нет доступа. Ожидалось сообщение от администратора")
+            return
+
         parts = user_position.split('_')
-        if len(parts) == 3 and parts[2].isdigit():
-            ticket_id = int(parts[2])
+        if len(parts) == 6 and parts[-1].isdigit():
+            ticket_id = int(parts[-1])
+            # Обновление комментария в базе данных
+            comment_text = message.text
+            current_time = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=TIME_ZONE)))
+            sql.add_comment_to_ticket(tg_id_ticket=ticket_id, is_from_user=False, message_time=str(current_time), text=comment_text)
+
+            notification_text = f"К задаче №{ticket_id} добавлен комментарий:\n\n{comment_text}"
+            # Подтверждение для администратора
+            builder = InlineKeyboardBuilder()
+            builder.row(InlineKeyboardButton(text="📔 К задаче", callback_data=f"ticket_{ticket_id}"))
+            builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_panel"))
+            keyboard = builder.as_markup()
+            await message.answer(notification_text, reply_markup=keyboard, parse_mode="HTML")
+
+            # Отправить сообщение пользователю о том, что к заявке был добавлен комментарий
+            builder = InlineKeyboardBuilder()
+            builder.row(
+                InlineKeyboardButton(text="📔 К задаче", callback_data=f"my_ticket_add_comment_to_ticket_{ticket_id}"))
+            keyboard = builder.as_markup()
+            await bot.send_message(sql.get_ticket_autor(ticket_id), notification_text, reply_markup=keyboard,
+                                   parse_mode="HTML")
+
+    if user_position.startswith("admin_close_ticket_"):
+        parts = user_position.split('_')
+        if len(parts) == 4 and parts[-1].isdigit():
+            ticket_id = int(parts[-1])
             # Обновление комментария в базе данных
             comment_text = message.text
             sql.update_ticket_comment(ticket_id, comment_text)
-            
+
             # Создаем кнопку "✅ Выполнить"
             builder = InlineKeyboardBuilder()
             builder.button(text="✅ Завершить задачу", callback_data=f"complete_{ticket_id}")
             keyboard = builder.as_markup()
-            
+
             # Вставляем переменные в текст сообщения
             success_message = f"<b>Комментарий к тикету <code>#{ticket_id}</code> успешно записан!</b>\n\n<b>Ответ исполнителя:</b> - <em>{comment_text}</em>\n\n<em>⚠️ Если вы допустили ошибку, просто отправьте исправленное сообщение еще раз.</em>"
             await message.reply(success_message, reply_markup=keyboard, parse_mode="HTML")
         else:
             await message.reply("Ошибка формата номера тикета", parse_mode="HTML")
-                
+
     if user_position == 'edit_company_name':
         sql.update_profile_data(user_id, 'organization', message.text)
         text, keyboard = my_company(user_id)
@@ -740,7 +956,39 @@ async def handle_text_input(message: types.Message):
             await bot.send_message(ADMIN_MESSAGE, admin_text, parse_mode="HTML", reply_markup=keyboard_markup)
         else:
             await message.reply("Ошибка при получении заявки.")
-            
+
+    if user_position.startswith('my_ticket_add_comment_to_ticket_'):
+        parts = user_position.split('_')
+        if len(parts) == 7 and parts[-1].isdigit():
+            ticket_id = int(parts[-1])
+
+            # Проверить, что автор задачи и автор сообщения совпадают
+            if user_id != sql.get_ticket_autor(ticket_id):
+                await message.answer("У Вас нет доступа! Ожидалось сообщение от автора задачи!")
+                return
+
+            # Обновление комментария в базе данных
+            comment_text = message.text
+            current_time = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=TIME_ZONE)))
+            sql.add_comment_to_ticket(tg_id_ticket=ticket_id, is_from_user=True, message_time=str(current_time),
+                                      text=comment_text)
+
+        notification_text = f"К задаче №{ticket_id} добавлен комментарий:\n\n{comment_text}"
+
+        # Подтверждение для администратора
+        builder = InlineKeyboardBuilder()
+        builder.row(InlineKeyboardButton(text="📔 К задаче", callback_data=f"ticket_{ticket_id}"))
+        builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="my_ticket_in_progress"))
+        keyboard = builder.as_markup()
+        await message.answer(notification_text, reply_markup=keyboard, parse_mode="HTML")
+
+        # Отправить сообщение пользователю о том, что к заявке был добавлен комментарий
+        builder = InlineKeyboardBuilder()
+        builder.row(
+            InlineKeyboardButton(text="📔 К задаче", callback_data=f"my_ticket_in_progress_details_{ticket_id}"))
+        keyboard = builder.as_markup()
+        await bot.send_message(sql.get_ticket_autor(ticket_id), notification_text, reply_markup=keyboard, parse_mode="HTML")
+
 
 # Основная функция запуска бота
 async def main():
