@@ -409,7 +409,11 @@ async def handle_ticket_callback(query: types.CallbackQuery):
         await query.message.edit_text(text, reply_markup=keyboard_markup, parse_mode="HTML")
 
 
-@dp.callback_query(lambda query: query.data.startswith(('ticket_', 'my_ticket_page_', 'get_files_')))
+@dp.callback_query(lambda query: query.data.startswith(('ticket_',
+                                                        'my_ticket_page_',
+                                                        'get_files_',
+                                                        'admin_close_ticket_',
+                                                        'admin_add_comment_to_ticket_')))
 async def handle_ticket_callback(query: types.CallbackQuery):
     user_id = query.from_user.id
     tg_id = user_id
@@ -418,12 +422,24 @@ async def handle_ticket_callback(query: types.CallbackQuery):
     if not check_rights(user_id=user_id, is_from_admin_page=False):
         await query.answer("У Вас нет доступа")
         return
-    
 
-    if query.data.startswith('ticket_'):
-        ticket_id = query.data.split('_')[1]
+    if query.data.startswith('admin_add_comment_to_ticket_'):
+        ticket_id = query.data.split('_')[-1]
         ticket_info = sql.get_ticket_info(int(ticket_id))
-        sql.update_pos(f'ticket_details_{ticket_info[0]}', 'tg_id', user_id)
+        sql.update_pos(f'admin_add_comment_to_ticket_{ticket_info[0]}', 'tg_id', user_id)
+        await query.answer()
+        text =  f"<b>Номер заявки:</b> <code>#{ticket_info[0]}\n\n</code>" \
+                f"Напишите комментарий к заявке, либо вернитесь в пришлое меню"
+        builder = InlineKeyboardBuilder()
+        builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="ticket_" + ticket_id))
+        keyboard_markup = builder.as_markup()
+        await query.message.edit_text(text, reply_markup=keyboard_markup, parse_mode="HTML")
+
+
+    if query.data.startswith('admin_close_ticket_'):
+        ticket_id = query.data.split('_')[-1]
+        ticket_info = sql.get_ticket_info(int(ticket_id))
+        sql.update_pos(f'admin_close_ticket_{ticket_info[0]}', 'tg_id', user_id)
         await query.answer()
         text = f"<b>Детали заявки:</b> <code>#{ticket_info[0]}\n\n</code>" \
                f"<b>Пользователь ID:</b> <a href='tg://user?id={ticket_info[1]}'>{ticket_info[1]}</a>\n" \
@@ -433,10 +449,37 @@ async def handle_ticket_callback(query: types.CallbackQuery):
                f"<b>Время создания:</b> {ticket_info[5]}\n" \
                f"<b>Статус:</b> {ticket_info[6]}\n\n" \
                f"<em>⚠️ Для завершения задачи введите комментарий. В ответ вам придет сообщение с подтвержением!</em>"
+        builder = InlineKeyboardBuilder()
+        builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="ticket_" + ticket_id))
+        keyboard_markup = builder.as_markup()
+        await query.message.edit_text(text, reply_markup=keyboard_markup, parse_mode="HTML")
+
+    if query.data.startswith('ticket_'):
+        ticket_id = query.data.split('_')[-1]
+        ticket_info = sql.get_ticket_info(int(ticket_id))
+        sql.update_pos(f'ticket_details_{ticket_info[0]}', 'tg_id', user_id)
+
+        messages = sql.get_comments(ticket_info[0])
+
+        await query.answer()
+        text = f"<b>Детали заявки:</b> <code>#{ticket_info[0]}\n\n</code>" \
+               f"<b>Пользователь ID:</b> <a href='tg://user?id={ticket_info[1]}'>{ticket_info[1]}</a>\n" \
+               f"<b>Организация:</b> {ticket_info[2]}\n" \
+               f"<b>Адрес:</b> {ticket_info[3]}\n\n" \
+               f"<b>Сообщение от пользователя:</b> - <em>{ticket_info[4]}</em>\n\n"
+
+        for message_info in messages:
+            text += f"<b>{message_info[1]}</b> - <em>{message_info[3]}</em>\n"
+
+        text += f"\n" \
+                f"<b>Время создания:</b> {ticket_info[5]}\n" \
+                f"<b>Статус:</b> {ticket_info[6]}"
 
         builder = InlineKeyboardBuilder()
         if check_dir_presence(ticket_id):
             builder.row(InlineKeyboardButton(text="📂 Получить файлы", callback_data="get_files_" + ticket_id))
+        builder.row(InlineKeyboardButton(text="🗒 Добавить комментарий", callback_data="admin_add_comment_to_ticket_" + ticket_id))
+        builder.row(InlineKeyboardButton(text="✅ Закрыть задачу", callback_data="admin_close_ticket_" + ticket_id))
         builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_panel"))
         keyboard_markup = builder.as_markup()
         await query.message.edit_text(text, reply_markup=keyboard_markup, parse_mode="HTML")
@@ -672,26 +715,45 @@ async def handle_text_input(message: types.Message):
         else:
             await message.answer("Отправьте файл как документ")
 
-
-    if user_position.startswith('ticket_details_'):
+    if user_position.startswith("admin_add_comment_to_ticket_"):
         parts = user_position.split('_')
-        if len(parts) == 3 and parts[2].isdigit():
-            ticket_id = int(parts[2])
+        if len(parts) == 6 and parts[-1].isdigit():
+            ticket_id = int(parts[-1])
+            # Обновление комментария в базе данных
+            comment_text = message.text
+            current_time = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=TIME_ZONE)))
+            sql.add_comment_to_ticket(tg_id_ticket=ticket_id, is_from_user=False, message_time=str(current_time), text=comment_text)
+
+            notification_text = f"К задаче №{ticket_id} добавлен комментарий:\n\n{comment_text}"
+            # Подтверждение для администратора
+            builder = InlineKeyboardBuilder()
+            builder.row(InlineKeyboardButton(text="📔 К задаче", callback_data=f"ticket_{ticket_id}"))
+            builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_panel"))
+            keyboard = builder.as_markup()
+            await message.answer(notification_text, reply_markup=keyboard, parse_mode="HTML")
+
+            # Отправить сообщение пользователю о том, что к заявке был добавлен комментарий
+            await bot.send_message(sql.get_ticket_autor(ticket_id), notification_text)
+
+    if user_position.startswith("admin_close_ticket_"):
+        parts = user_position.split('_')
+        if len(parts) == 4 and parts[-1].isdigit():
+            ticket_id = int(parts[-1])
             # Обновление комментария в базе данных
             comment_text = message.text
             sql.update_ticket_comment(ticket_id, comment_text)
-            
+
             # Создаем кнопку "✅ Выполнить"
             builder = InlineKeyboardBuilder()
             builder.button(text="✅ Завершить задачу", callback_data=f"complete_{ticket_id}")
             keyboard = builder.as_markup()
-            
+
             # Вставляем переменные в текст сообщения
             success_message = f"<b>Комментарий к тикету <code>#{ticket_id}</code> успешно записан!</b>\n\n<b>Ответ исполнителя:</b> - <em>{comment_text}</em>\n\n<em>⚠️ Если вы допустили ошибку, просто отправьте исправленное сообщение еще раз.</em>"
             await message.reply(success_message, reply_markup=keyboard, parse_mode="HTML")
         else:
             await message.reply("Ошибка формата номера тикета", parse_mode="HTML")
-                
+
     if user_position == 'edit_company_name':
         sql.update_profile_data(user_id, 'organization', message.text)
         text, keyboard = my_company(user_id)

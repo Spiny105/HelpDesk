@@ -1,6 +1,8 @@
 import sqlite3
 import json
 
+from pyasn1.type.univ import Boolean
+
 DB_PATH = 'app/database.db'
 
 def execute_query(query, params=None):
@@ -40,15 +42,64 @@ def create_tables():
             number_ticket INTEGER PRIMARY KEY AUTOINCREMENT,
             tg_id_ticket INTEGER,
             organization TEXT,
-            addres_ticket TEXT,
+            addres_ticket TEXT, 
             message_ticket TEXT,
             time_ticket TEXT,
             state_ticket TEXT,
             ticket_comm TEXT
         )
     '''
+    messages = '''
+        CREATE TABLE IF NOT EXISTS messages (
+            message_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            message_author TEXT,
+            message_time TEXT,
+            message_text TEXT,
+            ticket_id INTEGER,
+            FOREIGN KEY (ticket_id) REFERENCES ticket (number_ticket) ON DELETE CASCADE
+        )
+    '''
     execute_query(users)
     execute_query(ticket)
+    execute_query(messages)
+
+
+def add_comment_to_ticket(tg_id_ticket, is_from_user, message_time, text):
+    """
+        Добавляет комментарий в существующий тикет.
+
+        Parameters:
+            tg_id_ticket (int): Номер тикета.
+            is_from_user (bool): True - от пользователя, False - от исполнителя
+            message_time (str): Время добавления комментария
+            text (str): Новый комментарий.
+
+        Returns:
+            bool: Флаг успешного выполнения операции (True - успешно, False - ошибка).
+        """
+    message_author = 'Пользователь' if is_from_user else 'Исполнитель'
+    query = '''INSERT INTO messages (message_author, message_time, message_text, ticket_id) VALUES (?, ?, ?, ?)'''
+    execute_query(query, (message_author, message_time, text, tg_id_ticket))
+    return True
+
+
+def get_comments(ticket_id):
+    """
+        Возвращает список комментариев к указанному тикета.
+
+        Parameters:
+            ticket_id (int): Номер тикета.
+
+        Returns:
+            list: Список кортежей с комментариями и данными о них.
+        """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM messages WHERE ticket_id=? ORDER BY message_id', (ticket_id,))
+    comments = cursor.fetchall()
+    conn.close()
+    return comments
+
 
 
 def add_user(tg_id, pos, data_reg, profile):
@@ -326,6 +377,15 @@ def get_ticket_info(ticket_id):
     ticket_info = cursor.fetchone()
     conn.close()
     return ticket_info
+
+
+def get_ticket_autor(ticket_id):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('SELECT tg_id_ticket FROM ticket WHERE number_ticket=?', (ticket_id,))
+    autor_id = cursor.fetchone()
+    conn.close()
+    return autor_id[0]
 
 
 def update_ticket_status(ticket_id, new_status):
